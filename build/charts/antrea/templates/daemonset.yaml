@@ -1,0 +1,194 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    app: antrea
+    component: antrea-agent
+  name: antrea-agent
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: antrea
+      component: antrea-agent
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: antrea-agent
+      labels:
+        app: antrea
+        component: antrea-agent
+    spec:
+      containers:
+        - args:
+            - --config
+            - /etc/antrea/antrea-agent.conf
+            - --logtostderr=false
+            - --log_dir=/var/log/tos/antrea
+            - --alsologtostderr
+            - --log_file_max_size=100
+            - --log_file_max_num=4
+            - --v=0
+          command:
+            - antrea-agent
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: ALLOW_NO_ENCAP_WITHOUT_ANTREA_PROXY
+              value: "true"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: "{{ .Values.image.pullPolicy }}"
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - container_liveness_probe agent
+            failureThreshold: 5
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          name: antrea-agent
+          ports:
+            - containerPort: 10350
+              name: api
+              protocol: TCP
+          readinessProbe:
+            failureThreshold: 8
+            httpGet:
+              host: localhost
+              path: /readyz
+              port: api
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 200m
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - mountPath: /etc/antrea/antrea-agent.conf
+              name: antrea-config
+              readOnly: true
+              subPath: antrea-agent.conf
+            - mountPath: /var/run/antrea
+              name: host-var-run-antrea
+            - mountPath: /var/lib/cni
+              name: host-var-run-antrea
+              subPath: cni
+            - mountPath: /var/log/tos/antrea
+              name: host-var-log-antrea
+            - mountPath: /host/proc
+              name: host-proc
+              readOnly: true
+            - mountPath: /host/var/run/netns
+              mountPropagation: HostToContainer
+              name: host-var-run-netns
+              readOnly: true
+            - mountPath: /run/xtables.lock
+              name: xtables-lock
+            - mountPath: /var/run/openvswitch
+              name: host-run-openvswitch
+            - mountPath: /var/log/openvswitch
+              name: host-log-openvswitch
+      dnsPolicy: ClusterFirstWithHostNet
+      hostNetwork: true
+      initContainers:
+        - command:
+            - install_cni
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: "{{ .Values.image.pullPolicy }}"
+          name: install-cni
+          resources:
+            requests:
+              cpu: 100m
+          securityContext:
+            capabilities:
+              add:
+                - SYS_MODULE
+          volumeMounts:
+            - mountPath: /etc/antrea/antrea-cni.conflist
+              name: antrea-config
+              readOnly: true
+              subPath: antrea-cni.conflist
+            - mountPath: /host/etc/cni/net.d
+              name: host-cni-conf
+            - mountPath: /host/opt/cni/bin
+              name: host-cni-bin
+            - mountPath: /lib/modules
+              name: host-lib-modules
+              readOnly: true
+            - mountPath: /var/run/antrea
+              name: host-var-run-antrea
+            - mountPath: /var/run/openvswitch
+              name: host-run-openvswitch
+            - mountPath: /var/log/openvswitch
+              name: host-log-openvswitch
+            - mountPath: /host/opt/antrea/bin
+              name: host-antrea-bin
+      nodeSelector:
+        kubernetes.io/os: linux
+      priorityClassName: system-node-critical
+      serviceAccountName: antrea-agent
+      tolerations:
+        - key: CriticalAddonsOnly
+          operator: Exists
+        - effect: NoSchedule
+          operator: Exists
+        - effect: NoExecute
+          operator: Exists
+      volumes:
+        - configMap:
+            name: antrea-config-2k82d6f6t4
+          name: antrea-config
+        - hostPath:
+            path: /etc/cni/net.d
+          name: host-cni-conf
+        - hostPath:
+            path: /opt/cni/bin
+          name: host-cni-bin
+        - hostPath:
+            path: /proc
+          name: host-proc
+        - hostPath:
+            path: /var/run/netns
+          name: host-var-run-netns
+        - hostPath:
+            path: /var/run/antrea
+            type: DirectoryOrCreate
+          name: host-var-run-antrea
+        - hostPath:
+            path: /var/log/tos/antrea
+            type: DirectoryOrCreate
+          name: host-var-log-antrea
+        - hostPath:
+            path: /lib/modules
+          name: host-lib-modules
+        - hostPath:
+            path: /run/xtables.lock
+            type: FileOrCreate
+          name: xtables-lock
+        - hostPath:
+            path: /var/run/openvswitch
+          name: host-run-openvswitch
+        - hostPath:
+            path: /var/log/openvswitch
+          name: host-log-openvswitch
+        - hostPath:
+            path: /opt/antrea/bin
+            type: DirectoryOrCreate
+          name: host-antrea-bin
+  updateStrategy:
+    type: RollingUpdate

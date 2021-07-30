@@ -1,0 +1,7 @@
+image:
+  repository: transwarp/antrea
+  tag: {{ IMG_VERSION }}
+  pullPolicy: IfNotPresent
+
+metricsAddr: 127.0.0.1:8080
+serviceCIDR: {}

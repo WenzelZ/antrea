@@ -8,11 +8,16 @@ GO_FILES           := $(shell find . -type d -name '.cache' -prune -o -type f -n
 GOPATH             ?= $$($(GO) env GOPATH)
 DOCKER_CACHE       := $(CURDIR)/.cache
 ANTCTL_BINARY_NAME ?= antctl
-OVS_VERSION        := $(shell head -n 1 build/images/deps/ovs-version)
-GO_VERSION         := $(shell head -n 1 build/images/deps/go-version)
+OVS_VERSION        := $(shell head -n 1 build/deps/ovs-version)
+GO_VERSION         := $(shell head -n 1 build/deps/go-version)
 
 DOCKER_BUILD_ARGS = --build-arg OVS_VERSION=$(OVS_VERSION)
 DOCKER_BUILD_ARGS += --build-arg GO_VERSION=$(GO_VERSION)
+
+
+# Image URL to use all building/pushing image targets
+IMG_COMMIT=$(shell git rev-parse HEAD)
+TIME=$(shell date +%Y%m%d-%H%M%S)
 
 .PHONY: all
 all: build
@@ -421,3 +426,22 @@ markdownlint-fix:
 spelling-fix:
 	@echo "===> Updating incorrect spellings <==="
 	$(CURDIR)/hack/update-spelling.sh
+
+build-antrea:
+	source ./hack/env.sh; \
+    docker build . --network host \
+        -t 172.16.1.99/$${TOS_IMAGE_REPO}/$${COMPONENT_NAME}:$${IMG_VERSION} \
+        --label CODE_VERSION=${IMG_COMMIT} --label BRANCH=$${IMG_VERSION} --label COMPILE_DATE=${TIME} \
+        -f build/dockerfile/Dockerfile
+
+# Push the docker image
+docker-push:
+	source hack/env.sh; \
+	docker push 172.16.1.99/$${TOS_IMAGE_REPO}/$${COMPONENT_NAME}:$${IMG_VERSION}
+
+package:
+	./build/deploy/package.sh
+charts-push:
+	./hack/push-charts.sh
+render:
+	./hack/render.sh

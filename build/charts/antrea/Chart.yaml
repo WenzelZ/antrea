@@ -1,0 +1,17 @@
+annotations:
+  artifacthub.io/changes: |
+    - Initial helm chart changelog
+apiVersion: v1
+appVersion: v1.5.0
+description: Antrea is a Kubernetes networking solution intended to be Kubernetes native.
+home: https://antrea.io/
+keywords:
+  - network
+  - cni
+maintainers:
+  - name: haad
+name: antrea
+sources:
+  - https://github.com/antrea-io/antrea
+type: application
+version: v1.5.0

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Todo: check version and continue installation only for a newer version
+
+# Install Antrea configuration file
+install -m 644 /etc/antrea/antrea-cni.conflist /host/etc/cni/net.d/10-antrea.conflist
+
+# Install Antrea binary file
+install -m 755 /usr/local/bin/antrea-cni /host/opt/cni/bin/antrea
+
+# If more than one CNI config file exists, the file with the lowest name is
+# chosen i.e. existing 10-antrea.conf will be chosen over 10-antrea.conflist.
+# Hence, delete older 10-antrea.conf file.
+rm -f /host/etc/cni/net.d/10-antrea.conf
+
+# Install the loopback plugin.
+# It is required by kubelet on Linux when using docker as the container runtime.
+# We replace the binary files even they are already present on the Node to make
+# sure expected versions are used.
+install -m 755 /opt/cni/bin/loopback /host/opt/cni/bin/loopback
+
+# Install PortMap CNI binary file. It is required to support hostPort.
+install -m 755 /opt/cni/bin/portmap /host/opt/cni/bin/portmap
+
+# Install bandwidth CNI binary file. It is required to support traffic shaping.
+install -m 755 /opt/cni/bin/bandwidth /host/opt/cni/bin/bandwidth
+
+# Install whereabouts IPAM binary file. Required for global IPAM support specific to CNF use cases.
+install -m 755 /opt/cni/bin/whereabouts /host/opt/cni/bin/whereabouts
+
+# Load the OVS kernel module
+modprobe openvswitch || (echo "Failed to load the OVS kernel module from the container, try running 'modprobe openvswitch' on your Nodes"; exit 1)
+
+# Load the WireGuard kernel module. This is only required when WireGuard encryption is enabled.
+# We could parse the antrea config file in the init-container to dynamically load this kernel module in the future.
+modprobe wireguard || (echo "Failed to load the WireGuard kernel module, WireGuard encryption will not be available")
+
+# Change the default permissions of the run directory.
+chmod 0750 /var/run/antrea
+
+# Install antctl binary file
+install -m 755 /usr/local/bin/antctl /host/opt/antrea/bin/antctl
+
+# Install ovs-vsctl binary file
+install -m 755 /usr/bin/ovs-vsctl /host/opt/antrea/bin/ovs-vsctl
+
+# Install ovs-ofctl binary file
+install -m 755 /usr/bin/ovs-ofctl /host/opt/antrea/bin/ovs-ofctl
+
+# Install ovs-appctl binary file
+install -m 755 /usr/bin/ovs-appctl /host/opt/antrea/bin/ovs-appctl

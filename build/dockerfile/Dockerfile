@@ -1,0 +1,23 @@
+FROM 172.16.1.99/tostmp/tos-k8s-base as antrea-build
+
+ENV GOPROXY https://goproxy.cn
+
+WORKDIR /antrea
+
+COPY go.mod /antrea/go.mod
+
+RUN go mod download
+
+COPY . /antrea
+
+RUN make antrea-agent antrea-controller antrea-cni antctl-ubuntu
+
+FROM 172.16.1.99/tostmp/antrea-base:v2.14.0
+
+LABEL maintainer="Antrea <projectantrea-dev@googlegroups.com>"
+LABEL description="The Docker image to deploy the Antrea CNI. "
+
+USER root
+
+COPY build/scripts/* /usr/local/bin/
+COPY --from=antrea-build /antrea/bin/* /usr/local/bin/
