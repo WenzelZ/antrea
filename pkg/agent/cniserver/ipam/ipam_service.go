@@ -63,10 +63,11 @@ func RegisterIPAMDriver(ipamType string, ipamDriver IPAMDriver) error {
 
 func argsFromEnv(cniArgs *cnipb.CniCmdArgs) *invoke.Args {
 	return &invoke.Args{
-		ContainerID: cniArgs.ContainerId,
-		NetNS:       cniArgs.Netns,
-		IfName:      cniArgs.Ifname,
-		Path:        cniArgs.Path,
+		ContainerID:   cniArgs.ContainerId,
+		NetNS:         cniArgs.Netns,
+		IfName:        cniArgs.Ifname,
+		Path:          cniArgs.Path,
+		PluginArgsStr: cniArgs.GetArgs(),
 	}
 }
 

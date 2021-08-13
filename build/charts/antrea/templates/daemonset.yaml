@@ -103,6 +103,16 @@ spec:
               name: host-run-openvswitch
             - mountPath: /var/log/openvswitch
               name: host-log-openvswitch
+            - mountPath: /opt/cni/bin/host-local
+              name: host-local-cni-bin
+            - mountPath: /var/lib/cni/antrea
+              name: host-var-lib-antrea
+            - mountPath: /var/log/kubernetes/cni.log
+              name: host-var-log-cni
+            - mountPath: /var/run/docker.sock
+              name: host-docker-lock
+            - mountPath: /usr/bin/docker
+              name: host-docker-bin
       dnsPolicy: ClusterFirstWithHostNet
       hostNetwork: true
       initContainers:
@@ -190,5 +200,25 @@ spec:
             path: /opt/antrea/bin
             type: DirectoryOrCreate
           name: host-antrea-bin
+        - hostPath:
+            path: /opt/cni/bin/host-local
+            type: FileOrCreate
+          name: host-local-cni-bin
+        - hostPath:
+            path: /var/lib/cni/antrea
+            type: DirectoryOrCreate
+          name: host-var-lib-antrea
+        - hostPath:
+            path: /var/log/kubernetes/cni.log
+            type: FileOrCreate
+          name: host-var-log-cni
+        - hostPath:
+            path: /var/run/docker.sock
+            type: Socket
+          name: host-docker-lock
+        - hostPath:
+            path: /usr/bin/docker
+            type: FileOrCreate
+          name: host-docker-bin
   updateStrategy:
     type: RollingUpdate

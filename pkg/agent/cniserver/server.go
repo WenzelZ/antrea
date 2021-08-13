@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -386,6 +387,7 @@ func (s *CNIServer) GetPodConfigurator() *podConfigurator {
 
 func (s *CNIServer) CmdAdd(ctx context.Context, request *cnipb.CniCmdRequest) (*cnipb.CniCmdResponse, error) {
 	klog.Infof("Received CmdAdd request %v", request)
+	networkConfig := request.CniArgs.NetworkConfiguration
 	cniConfig, response := s.checkRequestMessage(request)
 	if response != nil {
 		return response, nil
@@ -430,8 +432,24 @@ func (s *CNIServer) CmdAdd(ctx context.Context, request *cnipb.CniCmdRequest) (*
 		return resp, err
 	}
 
+	podName := string(cniConfig.K8S_POD_NAME)
+	podNamespace := string(cniConfig.K8S_POD_NAMESPACE)
+
+	// get configured static ip for sts and wsts pod
+	_, isStatefulSet, configuredPodIp, err := getConfiguredStaticIp(s.kubeClient, podName, podNamespace, false)
+	if err != nil {
+		klog.Errorf("Failed to get configured static ip for podName:%s, podNamespace:%s, %v", podName, podNamespace, err)
+	}
+	// config static ip map set for sts and wsts if the pod has configured staticIp metadata
+	if isStatefulSet && configuredPodIp != "" {
+		klog.Infof("Config static ip %s for podName:%s, podNamespace:%s", configuredPodIp, podName, podNamespace)
+		configIPAMForStaticIp(newStaticIpMapSet(configuredPodIp), cniConfig.CniCmdArgs)
+	}
+
+	// config kubeconfig file path for tos host-local ipam
+	configKubeConfig(networkConfig, cniConfig.CniCmdArgs)
+
 	var ipamResult *current.Result
-	var err error
 	// Only allocate IP when handling CNI request from infra container.
 	// On windows platform, CNI plugin is called for all containers in a Pod.
 	if !isInfraContainer {
@@ -449,11 +467,15 @@ func (s *CNIServer) CmdAdd(ctx context.Context, request *cnipb.CniCmdRequest) (*
 	klog.Infof("Requested ip addresses for container %v: %v", cniConfig.ContainerId, ipamResult)
 	result.IPs = ipamResult.IPs
 	result.Routes = ipamResult.Routes
+
+	if isStatefulSet && configuredPodIp == "" && len(result.IPs) > 0 {
+		if err := saveStatefulSet(podName, podNamespace, result.IPs[0].Address.IP.String()); err != nil {
+			klog.Errorf("Failed to save static ip for podName:%s, podNamespace:%s, %v", podName, podNamespace, err)
+		}
+	}
 	// Ensure interface gateway setting and mapping relations between result.Interfaces and result.IPs
 	updateResultIfaceConfig(result, s.nodeConfig.GatewayConfig.IPv4, s.nodeConfig.GatewayConfig.IPv6)
 	// Setup pod interfaces and connect to ovs bridge
-	podName := string(cniConfig.K8S_POD_NAME)
-	podNamespace := string(cniConfig.K8S_POD_NAMESPACE)
 	updateResultDNSConfig(result, cniConfig)
 	if err = s.podConfigurator.configureInterfaces(
 		podName,
@@ -502,6 +524,25 @@ func (s *CNIServer) CmdDel(_ context.Context, request *cnipb.CniCmdRequest) (
 	if s.isChaining {
 		return s.interceptDel(cniConfig)
 	}
+
+	podName := string(cniConfig.K8S_POD_NAME)
+	podNamespace := string(cniConfig.K8S_POD_NAMESPACE)
+
+	// get configured static ip for sts and wsts pod
+	isStaticIP, isStatefulSet, configuredPodIp, err := getConfiguredStaticIp(s.kubeClient, podName, podNamespace, true)
+	if err != nil {
+		klog.Errorf("Failed to get configured static ip for podName:%s, podNamespace:%s, %v", podName, podNamespace, err)
+	}
+
+	// Release IP from local static ips dir
+	if isStaticIP && !isStatefulSet && configuredPodIp != "" {
+		if err := delStatefulSet(podName, podNamespace); err != nil {
+			klog.Errorf("Failed to release static ip for podName:%s, podNamespace:%s, %v", podName, podNamespace, err)
+		}
+		os.Setenv("ReleaseIP", "true")
+		klog.Infof("Release static ip successful for podName:%s, podNamespace:%s", podName, podNamespace)
+	}
+
 	// Release IP to IPAM driver
 	if err := ipam.ExecIPAMDelete(cniConfig.CniCmdArgs, cniConfig.K8sArgs, cniConfig.IPAM.Type, infraContainer); err != nil {
 		klog.Errorf("Failed to delete IP addresses for container %v: %v", cniConfig.ContainerId, err)

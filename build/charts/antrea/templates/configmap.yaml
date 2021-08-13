@@ -235,6 +235,7 @@ data:
         "plugins": [
             {
                 "type": "antrea",
+                "kubeconfig": "/srv/kubernetes/kubeconfig-proxy",
                 "ipam": {
                     "type": "host-local"
                 }
