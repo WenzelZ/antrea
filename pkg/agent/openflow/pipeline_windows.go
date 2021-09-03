@@ -47,11 +47,11 @@ var (
 	snatCTMark = binding.NewCTMark(0x40, 0, 31)
 )
 
-func (c *client) snatMarkFlows(snatIP net.IP, mark uint32) []binding.Flow {
+func (c *client) snatMarkFlows(mac net.HardwareAddr, snatIP net.IP, mark uint32) []binding.Flow {
 	snatIPRange := &binding.IPRange{StartIP: snatIP, EndIP: snatIP}
 	nextTable := ConntrackCommitTable.GetNext()
 	flows := []binding.Flow{
-		c.snatIPFromTunnelFlow(snatIP, mark),
+		c.snatIPFromTunnelFlow(mac, snatIP, mark),
 		ConntrackCommitTable.BuildFlow(priorityNormal).
 			MatchProtocol(binding.ProtocolIP).
 			MatchCTStateNew(true).MatchCTStateTrk(true).MatchCTStateDNAT(false).

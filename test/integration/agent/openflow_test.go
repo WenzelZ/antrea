@@ -1483,7 +1483,7 @@ func expectedExternalFlows(nodeIP net.IP, localSubnet *net.IPNet, gwMAC net.Hard
 	}
 }
 
-func prepareSNATFlows(snatIP net.IP, mark, podOFPort, podOFPortRemote uint32, vMAC, localGwMAC net.HardwareAddr) []expectTableFlows {
+func prepareSNATFlows(snatIP net.IP, mark, podOFPort, podOFPortRemote uint32, vMAC, sourceMAC net.HardwareAddr) []expectTableFlows {
 	var ipProtoStr, tunDstFieldName string
 	if snatIP.To4() != nil {
 		tunDstFieldName = "tun_dst"
@@ -1506,7 +1506,7 @@ func prepareSNATFlows(snatIP net.IP, mark, podOFPort, podOFPortRemote uint32, vM
 				},
 				{
 					MatchStr: fmt.Sprintf("priority=200,%s,in_port=%d", ipProtoStr, podOFPortRemote),
-					ActStr:   fmt.Sprintf("set_field:%s->eth_src,set_field:%s->eth_dst,set_field:%s->%s,goto_table:IPTTLDec", localGwMAC.String(), vMAC.String(), snatIP, tunDstFieldName),
+					ActStr:   fmt.Sprintf("set_field:%s->eth_src,set_field:%s->eth_dst,set_field:%s->%s,goto_table:72", sourceMAC.String(), vMAC.String(), snatIP, tunDstFieldName),
 				},
 			},
 		},
@@ -1530,7 +1530,9 @@ func TestSNATFlows(t *testing.T) {
 	}()
 
 	snatIP := net.ParseIP("10.10.10.14")
+	tunnelPeerV4IP := net.ParseIP("20.10.10.14")
 	snatIPV6 := net.ParseIP("a963:ca9b:172:10::16")
+	tunnelPeerV6IP := net.ParseIP("b963:ca9b:172:10::16")
 	snatMark := uint32(14)
 	snatMarkV6 := uint32(16)
 	podOFPort := uint32(104)
@@ -1540,15 +1542,15 @@ func TestSNATFlows(t *testing.T) {
 
 	vMAC := config.globalMAC
 	gwMAC := config.nodeConfig.GatewayConfig.MAC
-	expectedFlows := append(prepareSNATFlows(snatIP, snatMark, podOFPort, podOFPortRemote, vMAC, gwMAC),
-		prepareSNATFlows(snatIPV6, snatMarkV6, podOFPortV6, podOFPortRemoteV6, vMAC, gwMAC)...)
+	expectedFlows := append(prepareSNATFlows(snatIP, snatMark, podOFPort, podOFPortRemote, vMAC, util.GenerateMacAddr(snatIP)),
+		prepareSNATFlows(snatIPV6, snatMarkV6, podOFPortV6, podOFPortRemoteV6, vMAC, util.GenerateMacAddr(snatIPV6))...)
 
 	c.InstallSNATMarkFlows(snatIP, snatMark)
 	c.InstallSNATMarkFlows(snatIPV6, snatMarkV6)
-	c.InstallPodSNATFlows(podOFPort, snatIP, snatMark)
-	c.InstallPodSNATFlows(podOFPortRemote, snatIP, 0)
-	c.InstallPodSNATFlows(podOFPortV6, snatIPV6, snatMarkV6)
-	c.InstallPodSNATFlows(podOFPortRemoteV6, snatIPV6, 0)
+	c.InstallPodSNATFlows(podOFPort, util.GenerateMacAddr(snatIP), tunnelPeerV4IP, snatMark)
+	c.InstallPodSNATFlows(podOFPortRemote, util.GenerateMacAddr(snatIP), tunnelPeerV4IP, 0)
+	c.InstallPodSNATFlows(podOFPortV6, util.GenerateMacAddr(snatIPV6), tunnelPeerV6IP, snatMarkV6)
+	c.InstallPodSNATFlows(podOFPortRemoteV6, util.GenerateMacAddr(snatIPV6), tunnelPeerV6IP, 0)
 	for _, tableFlow := range expectedFlows {
 		ofTestUtils.CheckFlowExists(t, ovsCtlClient, tableFlow.tableName, 0, true, tableFlow.flows)
 	}

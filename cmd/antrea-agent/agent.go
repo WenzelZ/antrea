@@ -333,7 +333,7 @@ func run(o *Options) error {
 	if features.DefaultFeatureGate.Enabled(features.Egress) {
 		egressController, err = egress.NewEgressController(
 			ofClient, antreaClientProvider, crdClient, ifaceStore, routeClient, nodeConfig.Name, nodeTransportIP,
-			memberlistCluster, egressInformer, podUpdateChannel, localIPDetector,
+			memberlistCluster, egressInformer, podUpdateChannel, localIPDetector, nodeInformer,
 		)
 		if err != nil {
 			return fmt.Errorf("error creating new Egress controller: %v", err)
