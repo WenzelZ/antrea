@@ -113,7 +113,7 @@ data:
     # ClusterIP CIDR range for Services. It's required when AntreaProxy is not enabled, and should be
     # set to the same value as the one specified by --service-cluster-ip-range for kube-apiserver. When
     # AntreaProxy is enabled, this parameter is not needed and will be ignored if provided.
-    serviceCIDR: 10.10.0.10/16
+    serviceCIDR: {{ .Values.serviceCIDR }}
 
     # ClusterIP CIDR range for IPv6 Services. It's required when using kube-proxy to provide IPv6 Service in a Dual-Stack
     # cluster or an IPv6 only cluster. The value should be the same as the configuration for kube-apiserver specified by
