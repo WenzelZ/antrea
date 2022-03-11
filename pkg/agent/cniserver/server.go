@@ -473,6 +473,13 @@ func (s *CNIServer) CmdAdd(ctx context.Context, request *cnipb.CniCmdRequest) (*
 			klog.Errorf("Failed to save static ip for podName:%s, podNamespace:%s, %v", podName, podNamespace, err)
 		}
 	}
+
+	if isStatefulSet && configuredPodIp != "" {
+		if err := removeStaticPodStaleFlows(s.podConfigurator, podName, podNamespace); err != nil {
+			klog.Errorf("failed to delete static pod stale Openflow entries for %s/%s %v", podName, podNamespace, err)
+		}
+	}
+
 	// Ensure interface gateway setting and mapping relations between result.Interfaces and result.IPs
 	updateResultIfaceConfig(result, s.nodeConfig.GatewayConfig.IPv4, s.nodeConfig.GatewayConfig.IPv6)
 	// Setup pod interfaces and connect to ovs bridge

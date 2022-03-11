@@ -35,9 +35,9 @@ import (
 
 const (
 	// The statefulSetDir is used to save static ip info
-	statefulSetDir     = "/var/lib/cni/antrea/statefulset/"
+	statefulSetDir = "/var/lib/cni/antrea/statefulset/"
 	// The staticIp annotation metadata key
-	staticIp           = "tos.network.staticIP"
+	staticIp = "tos.network.staticIP"
 )
 
 var statefulSetApiVersions = []string{"/apis/apps.transwarp.io/v1alpha1", "/apis/apps/v1"}
@@ -61,9 +61,9 @@ type KubeStatefulSetList struct {
 }
 
 func newStaticIpMapSet(podIp string) StaticIpMapSet {
-	return StaticIpMapSet {
-		"IP": podIp,
-		"CniType": "antrea",
+	return StaticIpMapSet{
+		"IP":       podIp,
+		"CniType":  "antrea",
 		"Override": "true",
 	}
 }
@@ -216,7 +216,7 @@ func configIPAMForStaticIp(staticIpSet StaticIpMapSet, ipamArgs *cnipb.CniCmdArg
 // configKubeConfig func config kubeconfig file path for ipam args
 func configKubeConfig(netConf []byte, ipamArgs *cnipb.CniCmdArgs) {
 	kubeConfig := &KubeConfig{}
-	if err := json.Unmarshal(netConf, kubeConfig); err != nil{
+	if err := json.Unmarshal(netConf, kubeConfig); err != nil {
 		klog.Errorf("Failed to parse kubeconfig from network configuration %v", err)
 	}
 	if kubeConfig.KubeconfigPath != "" {
@@ -224,9 +224,20 @@ func configKubeConfig(netConf []byte, ipamArgs *cnipb.CniCmdArgs) {
 	}
 }
 
-func configCNIArgs(key, value string, ipamArgs *cnipb.CniCmdArgs){
+func configCNIArgs(key, value string, ipamArgs *cnipb.CniCmdArgs) {
 	if len(ipamArgs.Args) > 0 && !strings.HasSuffix(ipamArgs.Args, ";") {
 		ipamArgs.Args += ";"
 	}
 	ipamArgs.Args += fmt.Sprintf("%s=%s", key, value)
+}
+
+func removeStaticPodStaleFlows(podConfigurator *podConfigurator, podName, podNamespace string) error {
+	ifaces := podConfigurator.ifaceStore.GetInterfacesByEntity(podName, podNamespace)
+	for _, iface := range ifaces {
+		if err := podConfigurator.ofClient.UninstallPodFlows(iface.InterfaceName); err != nil {
+			return err
+		}
+		klog.Infof("remove stale flows for %s/%s", podName, podNamespace)
+	}
+	return nil
 }
