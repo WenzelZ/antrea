@@ -206,6 +206,30 @@ func getConfiguredStaticIp(client clientset.Interface, podName, podNamespace str
 	return isStaticIP, isStatefulSet, configuredPodIp, nil
 }
 
+func prepareCheckStaticIpForDel(client clientset.Interface, podName, podNamespace string) (bool, bool) {
+
+	isStaticIP := false
+	isStatefulSet := false
+
+	configuredPodIp, _ := getStatefulSet(podName, podNamespace)
+	if configuredPodIp != "" {
+		isStaticIP = true
+	}
+
+	var err error
+	for _, apiVersion := range statefulSetApiVersions {
+		isStatefulSet, err = checkStatefulSet(client, apiVersion, podName, podNamespace)
+		if err != nil {
+			klog.Warningf("Failed to check StatefulSet resource, %v", err)
+		}
+		if isStatefulSet {
+			break
+		}
+	}
+
+	return isStaticIP, isStatefulSet
+}
+
 // configIPAMForStaticIp func config static ip to ipam args
 func configIPAMForStaticIp(staticIpSet StaticIpMapSet, ipamArgs *cnipb.CniCmdArgs) {
 	for key, value := range staticIpSet {

@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -536,26 +535,33 @@ func (s *CNIServer) CmdDel(_ context.Context, request *cnipb.CniCmdRequest) (
 	podNamespace := string(cniConfig.K8S_POD_NAMESPACE)
 
 	// get configured static ip for sts and wsts pod
-	isStaticIP, isStatefulSet, configuredPodIp, err := getConfiguredStaticIp(s.kubeClient, podName, podNamespace, true)
-	if err != nil {
-		klog.Errorf("Failed to get configured static ip for podName:%s, podNamespace:%s, %v", podName, podNamespace, err)
-	}
+	isStaticIP, isStatefulSet := prepareCheckStaticIpForDel(s.kubeClient, podName, podNamespace)
+
+	// Since need to release pod ip in normal CmdDel process, setting ReleaseIP to true as default value.
+	ReleaseIP := true
 
 	// Release IP from local static ips dir
-	if isStaticIP && !isStatefulSet && configuredPodIp != "" {
+	if isStaticIP && !isStatefulSet {
 		if err := delStatefulSet(podName, podNamespace); err != nil {
 			klog.Errorf("Failed to release static ip for podName:%s, podNamespace:%s, %v", podName, podNamespace, err)
 		}
-		os.Setenv("ReleaseIP", "true")
 		klog.Infof("Release static ip successful for podName:%s, podNamespace:%s", podName, podNamespace)
+	} else if isStaticIP && isStatefulSet {
+		// When static pod restart, just override the container ip info in /var/run/antrea/cni/networks/.
+		// So setting ReleaseIP to false.
+		ReleaseIP = false
+		klog.Infof("Reserve static ip successful for podName:%s, podNamespace:%s", podName, podNamespace)
 	}
 
-	// Release IP to IPAM driver
-	if err := ipam.ExecIPAMDelete(cniConfig.CniCmdArgs, cniConfig.K8sArgs, cniConfig.IPAM.Type, infraContainer); err != nil {
-		klog.Errorf("Failed to delete IP addresses for container %v: %v", cniConfig.ContainerId, err)
-		return s.ipamFailureResponse(err), nil
+	if ReleaseIP {
+		// Release IP to IPAM driver
+		if err := ipam.ExecIPAMDelete(cniConfig.CniCmdArgs, cniConfig.K8sArgs, cniConfig.IPAM.Type, infraContainer); err != nil {
+			klog.Errorf("Failed to delete IP addresses for container %v: %v", cniConfig.ContainerId, err)
+			return s.ipamFailureResponse(err), nil
+		}
+		klog.Infof("Deleted IP addresses for container %v", cniConfig.ContainerId)
 	}
-	klog.Infof("Deleted IP addresses for container %v", cniConfig.ContainerId)
+
 	// Remove host interface and OVS configuration
 	if err := s.podConfigurator.removeInterfaces(cniConfig.ContainerId); err != nil {
 		klog.Errorf("Failed to remove interfaces for container %s: %v", cniConfig.ContainerId, err)
