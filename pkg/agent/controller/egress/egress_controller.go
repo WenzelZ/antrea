@@ -81,6 +81,8 @@ var emptyWatch = watch.NewEmptyWatch()
 
 // egressState keeps the actual state of an Egress that has been realized.
 type egressState struct {
+	// The actual egress Node of the Egress.
+	egressNode string
 	// The actual egress IP of the Egress. If it's different from the desired IP, there is an update to EgressIP, and we
 	// need to remove previously installed flows.
 	egressIP string
@@ -505,13 +507,14 @@ func (c *EgressController) deleteEgressState(egressName string) {
 	delete(c.egressStates, egressName)
 }
 
-func (c *EgressController) newEgressState(egressName string, egressIP string) *egressState {
+func (c *EgressController) newEgressState(egressName string, egressIP, egressNode string) *egressState {
 	c.egressStatesMutex.Lock()
 	defer c.egressStatesMutex.Unlock()
 	state := &egressState{
-		egressIP: egressIP,
-		ofPorts:  sets.NewInt32(),
-		pods:     sets.NewString(),
+		egressIP:   egressIP,
+		egressNode: egressNode,
+		ofPorts:    sets.NewInt32(),
+		pods:       sets.NewString(),
 	}
 	c.egressStates[egressName] = state
 	return state
@@ -563,7 +566,7 @@ func (c *EgressController) unbindPodEgress(pod, egress string) (string, bool) {
 	return "", false
 }
 
-func (c *EgressController) updateEgressStatus(egress *crdv1a2.Egress, isLocal bool) error {
+func (c *EgressController) updateEgressStatus(egress *crdv1a2.Egress, isLocal bool) (string, error) {
 	toUpdate := egress.DeepCopy()
 	var updateErr, getErr error
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -590,11 +593,12 @@ func (c *EgressController) updateEgressStatus(egress *crdv1a2.Egress, isLocal bo
 		// Return the error from UPDATE.
 		return updateErr
 	}); err != nil {
-		return err
+		return toUpdate.Status.EgressNode, err
 	}
 	klog.V(2).InfoS("Updated Egress status", "Egress", egress.Name)
 	metrics.AntreaEgressStatusUpdates.Inc()
-	return nil
+
+	return toUpdate.Status.EgressNode, nil
 }
 
 func (c *EgressController) syncEgress(egressName string) error {
@@ -632,7 +636,7 @@ func (c *EgressController) syncEgress(egressName string) error {
 		return nil
 	}
 	if !exist {
-		eState = c.newEgressState(egressName, egress.Spec.EgressIP)
+		eState = c.newEgressState(egressName, egress.Spec.EgressIP, egress.Status.EgressNode)
 	}
 
 	localNodeSelected, err := c.cluster.ShouldSelectIP(egress.Spec.EgressIP, egress.Spec.ExternalIPPool)
@@ -661,7 +665,6 @@ func (c *EgressController) syncEgress(egressName string) error {
 	if err != nil {
 		return err
 	}
-
 	// If the mark changes, uninstall all of the Egress's Pod flows first, then installs them with new mark.
 	// It could happen when the Egress IP is added to or removed from the Node.
 	if eState.mark != mark {
@@ -672,72 +675,79 @@ func (c *EgressController) syncEgress(egressName string) error {
 		eState.mark = mark
 	}
 
-	if err := c.updateEgressStatus(egress, c.localIPDetector.IsLocalIP(egress.Spec.EgressIP)); err != nil {
+	egressNodeName, err := c.updateEgressStatus(egress, c.localIPDetector.IsLocalIP(egress.Spec.EgressIP))
+	if err != nil {
 		return fmt.Errorf("update Egress %s status error: %v", egressName, err)
 	}
-
-	if !localNodeSelected && egress.Status.EgressNode == "" {
-		return nil
-	}
-	nodeTransportAddrSet, err := c.getNodeTransportAddrSet()
-	if err != nil {
-		return err
-	}
-	nodeTranportAddr, exists := nodeTransportAddrSet[egress.Status.EgressNode]
-	if !exists {
-		return nil
+	egressNodeUpdated := false
+	if egressNodeName != eState.egressNode {
+		eState.egressNode = egressNodeName
+		egressNodeUpdated = true
 	}
 
 	var transportIP net.IP
-	if net.ParseIP(egress.Spec.EgressIP).To4() != nil {
-		transportIP = nodeTranportAddr.IPv4
-	} else {
-		transportIP = nodeTranportAddr.IPv6
+	if egressNodeName != "" {
+		nodeTransportAddrSet, err := c.getNodeTransportAddrSet()
+		if err != nil {
+			return err
+		}
+		nodeTransportAddr, exists := nodeTransportAddrSet[egressNodeName]
+		if !exists {
+			return nil
+		}
+		if net.ParseIP(egress.Spec.EgressIP).To4() != nil {
+			transportIP = nodeTransportAddr.IPv4
+		} else {
+			transportIP = nodeTransportAddr.IPv6
+		}
 	}
 
 	// Copy the previous ofPorts and Pods. They will be used to identify stale ofPorts and Pods.
 	staleOFPorts := eState.ofPorts.Union(nil)
 	stalePods := eState.pods.Union(nil)
 
-	// Get a copy of the desired Pods.
-	pods := func() sets.String {
-		c.egressGroupsMutex.RLock()
-		defer c.egressGroupsMutex.RUnlock()
-		pods, exist := c.egressGroups[egressName]
-		if !exist {
-			return nil
-		}
-		return pods.Union(nil)
-	}()
+	if transportIP != nil {
+		// Get a copy of the desired Pods.
+		pods := func() sets.String {
+			c.egressGroupsMutex.RLock()
+			defer c.egressGroupsMutex.RUnlock()
+			pods, exist := c.egressGroups[egressName]
+			if !exist {
+				return nil
+			}
+			return pods.Union(nil)
+		}()
 
-	// Install SNAT flows for desired Pods.
-	for pod := range pods {
-		eState.pods.Insert(pod)
-		stalePods.Delete(pod)
+		// Install SNAT flows for desired Pods.
+		for pod := range pods {
+			eState.pods.Insert(pod)
+			stalePods.Delete(pod)
+			// If the Egress is not the effective one for the Pod, do nothing.
+			if !c.bindPodEgress(pod, egressName) {
+				continue
+			}
 
-		// If the Egress is not the effective one for the Pod, do nothing.
-		if !c.bindPodEgress(pod, egressName) {
-			continue
-		}
+			// Get the Pod's openflow port.
+			parts := strings.Split(pod, "/")
+			podNamespace, podName := parts[0], parts[1]
+			ifaces := c.ifaceStore.GetContainerInterfacesByPod(podName, podNamespace)
+			if len(ifaces) == 0 {
+				klog.Infof("Interfaces of Pod %s/%s not found", podNamespace, podName)
+				continue
+			}
 
-		// Get the Pod's openflow port.
-		parts := strings.Split(pod, "/")
-		podNamespace, podName := parts[0], parts[1]
-		ifaces := c.ifaceStore.GetContainerInterfacesByPod(podName, podNamespace)
-		if len(ifaces) == 0 {
-			klog.Infof("Interfaces of Pod %s/%s not found", podNamespace, podName)
-			continue
-		}
+			ofPort := ifaces[0].OFPort
 
-		ofPort := ifaces[0].OFPort
-		if eState.ofPorts.Has(ofPort) {
+			if !egressNodeUpdated && eState.ofPorts.Has(ofPort) {
+				staleOFPorts.Delete(ofPort)
+				continue
+			}
+			if err := c.ofClient.InstallPodSNATFlows(uint32(ofPort), mac, transportIP, mark); err != nil {
+				return err
+			}
 			staleOFPorts.Delete(ofPort)
-			continue
+			eState.ofPorts.Insert(ofPort)
 		}
-		if err := c.ofClient.InstallPodSNATFlows(uint32(ofPort), mac, transportIP, mark); err != nil {
-			return err
-		}
-		eState.ofPorts.Insert(ofPort)
 	}
 
 	// Uninstall SNAT flows for stale Pods.
