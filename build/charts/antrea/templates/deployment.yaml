@@ -92,6 +92,7 @@ spec:
       hostNetwork: true
       nodeSelector:
         kubernetes.io/os: linux
+        node-role.transwarp.io/master: "true"
       priorityClassName: system-cluster-critical
       serviceAccountName: antrea-controller
       tolerations:
