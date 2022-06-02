@@ -873,7 +873,7 @@ func (c *client) InstallPodSNATFlows(ofPort uint32, mac net.HardwareAddr, tunnel
 	cacheKey := fmt.Sprintf("p%x", ofPort)
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
-	return c.addFlows(c.snatFlowCache, cacheKey, flows)
+	return c.modifyFlows(c.snatFlowCache, cacheKey, flows)
 }
 
 func (c *client) UninstallPodSNATFlows(ofPort uint32) error {
