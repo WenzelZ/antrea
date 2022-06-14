@@ -15,14 +15,21 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
+	"strconv"
 	"sync"
+	"time"
 
+	"antrea.io/antrea/pkg/signals"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apiserver/pkg/server/dynamiccertificates"
 	"k8s.io/client-go/kubernetes"
+	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/component-base/config"
@@ -46,6 +53,8 @@ type antreaClientProvider struct {
 	client versioned.Interface
 	// caContentProvider provides the very latest content of the ca bundle.
 	caContentProvider *dynamiccertificates.ConfigMapCAController
+	// kubeClient is a standard Kubernetes clientset
+	kubeClient clientset.Interface
 }
 
 var _ dynamiccertificates.Listener = &antreaClientProvider{}
@@ -63,6 +72,7 @@ func NewAntreaClientProvider(config config.ClientConnectionConfiguration, kubeCl
 	antreaClientProvider := &antreaClientProvider{
 		config:            config,
 		caContentProvider: antreaCAProvider,
+		kubeClient:        kubeClient,
 	}
 
 	antreaCAProvider.AddListener(antreaClientProvider)
@@ -108,7 +118,7 @@ func (p *antreaClientProvider) updateAntreaClient() error {
 			klog.Info("Didn't get CA certificate, skip updating Antrea Client")
 			return nil
 		}
-		kubeConfig, err = inClusterConfig(caBundle)
+		kubeConfig, err = p.inClusterConfig(caBundle)
 	} else {
 		kubeConfig, err = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 			&clientcmd.ClientConfigLoadingRules{ExplicitPath: p.config.Kubeconfig},
@@ -139,12 +149,25 @@ func (p *antreaClientProvider) updateAntreaClient() error {
 // kubernetes gives to pods. It's intended for clients that expect to be
 // running inside a pod running on kubernetes. It will return error
 // if called from a process not running in a kubernetes environment.
-func inClusterConfig(caBundle []byte) (*rest.Config, error) {
+func (p *antreaClientProvider) inClusterConfig(caBundle []byte) (*rest.Config, error) {
 	// #nosec G101: false positive triggered by variable name which includes "token"
 	const tokenFile = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 	host, port := os.Getenv("ANTREA_SERVICE_HOST"), os.Getenv("ANTREA_SERVICE_PORT")
 	if len(host) == 0 || len(port) == 0 {
-		return nil, fmt.Errorf("unable to load in-cluster configuration, ANTREA_SERVICE_HOST and ANTREA_SERVICE_PORT must be defined")
+		stopCh := signals.RegisterSignalHandlers()
+		if err := wait.PollImmediateUntil(1*time.Second, func() (bool, error) {
+			klog.InfoS("Waiting for Antrea service to be ready")
+			service, err := p.kubeClient.CoreV1().Services("kube-system").Get(context.TODO(), "antrea", metav1.GetOptions{})
+			if err != nil {
+				klog.ErrorS(err, "Unable to get Antrea service")
+				return false, nil
+			}
+			host, port = service.Spec.ClusterIP, strconv.FormatInt(int64(service.Spec.Ports[0].Port), 10)
+			return true, nil
+		}, stopCh); err != nil {
+			klog.InfoS("Stopped waiting for Antrea service")
+			return nil, err
+		}
 	}
 
 	token, err := ioutil.ReadFile(tokenFile)
