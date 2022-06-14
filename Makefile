@@ -30,6 +30,8 @@ UNAME_S := $(shell uname -s)
 USERID  := $(shell id -u)
 GRPID   := $(shell id -g)
 
+GOFLAGS ?= CGO_ENABLED=0 GO111MODULE=on GOPROXY=http://172.26.0.104:3000,https://goproxy.cn,https://goproxy.io,direct GOSUMDB=off
+
 .PHONY: bin
 bin:
 	@mkdir -p $(BINDIR)
@@ -38,7 +40,7 @@ bin:
 .PHONY: antrea-agent
 antrea-agent:
 	@mkdir -p $(BINDIR)
-	GOOS=linux $(GO) build -o $(BINDIR) $(GOFLAGS) -ldflags '$(LDFLAGS)' antrea.io/antrea/cmd/antrea-agent
+	GOOS=linux GOARCH=$(ARCH) $(GO) build -o $(BINDIR) $(GOFLAGS) -ldflags '$(LDFLAGS)' antrea.io/antrea/cmd/antrea-agent
 
 .PHONY: antrea-agent-simulator
 antrea-agent-simulator:
@@ -53,7 +55,7 @@ antrea-agent-instr-binary:
 .PHONY: antrea-controller
 antrea-controller:
 	@mkdir -p $(BINDIR)
-	GOOS=linux $(GO) build -o $(BINDIR) $(GOFLAGS) -ldflags '$(LDFLAGS)' antrea.io/antrea/cmd/antrea-controller
+	GOOS=linux GOARCH=$(ARCH) $(GO) build -o $(BINDIR) $(GOFLAGS) -ldflags '$(LDFLAGS)' antrea.io/antrea/cmd/antrea-controller
 
 .PHONY: .coverage
 .coverage:
@@ -69,12 +71,12 @@ antrea-controller-instr-binary:
 .PHONY: antrea-cni
 antrea-cni:
 	@mkdir -p $(BINDIR)
-	GOOS=linux CGO_ENABLED=0 $(GO) build -o $(BINDIR) $(GOFLAGS) -ldflags '$(LDFLAGS)' antrea.io/antrea/cmd/antrea-cni
+	GOOS=linux GOARCH=$(ARCH) CGO_ENABLED=0 $(GO) build -o $(BINDIR) $(GOFLAGS) -ldflags '$(LDFLAGS)' antrea.io/antrea/cmd/antrea-cni
 
 .PHONY: antctl-ubuntu
 antctl-ubuntu:
 	@mkdir -p $(BINDIR)
-	GOOS=linux $(GO) build -o $(BINDIR) $(GOFLAGS) -ldflags '$(LDFLAGS)' antrea.io/antrea/cmd/antctl
+	GOOS=linux GOARCH=$(ARCH) $(GO) build -o $(BINDIR) $(GOFLAGS) -ldflags '$(LDFLAGS)' antrea.io/antrea/cmd/antctl
 
 .PHONY: antctl-instr-binary
 antctl-instr-binary:
@@ -432,12 +434,24 @@ build-antrea:
     docker build . --network host \
         -t 172.16.1.99/$${TOS_IMAGE_REPO}/$${COMPONENT_NAME}:$${IMG_VERSION} \
         --label CODE_VERSION=${IMG_COMMIT} --label BRANCH=$${IMG_VERSION} --label COMPILE_DATE=${TIME} \
-        -f build/dockerfile/Dockerfile
+        -f build/dockerfile/Dockerfile.amd64
 
 # Push the docker image
 docker-push:
 	source hack/env.sh; \
 	docker push 172.16.1.99/$${TOS_IMAGE_REPO}/$${COMPONENT_NAME}:$${IMG_VERSION}
+
+build-antrea-arm64:
+	source ./hack/env.sh; \
+    docker build . --network host \
+        -t 172.16.1.99/$${TOS_IMAGE_REPO}/$${COMPONENT_NAME}-arm64:$${IMG_VERSION} \
+        --label CODE_VERSION=${IMG_COMMIT} --label BRANCH=$${IMG_VERSION} --label COMPILE_DATE=${TIME} \
+        -f build/dockerfile/Dockerfile.arm64
+
+# Push the docker image
+docker-push-arm64:
+	source hack/env.sh; \
+	docker push 172.16.1.99/$${TOS_IMAGE_REPO}/$${COMPONENT_NAME}-arm64:$${IMG_VERSION}
 
 package:
 	./build/deploy/package.sh

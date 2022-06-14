@@ -1,0 +1,9 @@
+# for arm64
+---
+images:
+  - ocidest: transwarp/antrea:{{ IMG_VERSION }}
+    src: 172.16.1.99/tostmp/antrea-arm64:{{ IMG_VERSION }}
+charts:
+  - http://172.16.1.99:9999/api/tostmp/charts/antrea:{{ CHART_VERSION }}
+yamls:
+  - build/deploy/yamls/
