@@ -1,0 +1,29 @@
+# Build the manager binary
+FROM 172.16.1.99/tostmp/kubebuilder-arm64:2.3.1-golang1.15 as antrea-build
+
+ENV GOPROXY https://goproxy.cn
+ENV GOPATH=/go
+
+WORKDIR /antrea
+
+COPY go.mod /antrea/go.mod
+
+RUN CGO_ENABLED=0 GO111MODULE=on GOPROXY=http://172.26.0.104:3000,https://goproxy.cn,https://goproxy.io,direct GOSUMDB=off GOARCH=arm64 go mod download
+
+COPY . /antrea
+
+RUN make antrea-agent ARCH=arm64
+RUN make antrea-controller ARCH=arm64
+RUN make antrea-cni ARCH=arm64
+RUN make antctl-ubuntu ARCH=arm64
+
+
+FROM 172.16.1.99/tostmp/antrea-ubuntu-arm64-base:v2.15.1
+
+LABEL maintainer="Antrea <projectantrea-dev@googlegroups.com>"
+LABEL description="The Docker image to deploy the Antrea CNI. "
+
+USER root
+
+COPY build/scripts/* /usr/local/bin/
+COPY --from=antrea-build /antrea/bin/* /usr/local/bin/
