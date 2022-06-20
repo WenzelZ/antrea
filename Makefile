@@ -455,6 +455,8 @@ docker-push-arm64:
 
 package:
 	./build/deploy/package.sh
+arm64-package:
+	./build/deploy/package-arm64.sh
 charts-push:
 	./hack/push-charts.sh
 render:
